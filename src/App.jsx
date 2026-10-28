@@ -190,7 +190,8 @@ export default function App() {
     }
 
     try {
-      const totalMonto = formVenta.cantidad * PRECIO_ENTRADA_FIX;
+      const cantNumerica = Number(formVenta.cantidad) || 1;
+      const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
       const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
 
       if (editingVenta) {
@@ -198,7 +199,7 @@ export default function App() {
         await updateDoc(docRef, {
           comprador: formVenta.comprador.trim(),
           telefono: formVenta.telefono.trim(),
-          cantidad: Number(formVenta.cantidad),
+          cantidad: cantNumerica,
           montoTotal: totalMonto,
           metodoPago: formVenta.metodoPago,
           estadoPago: formVenta.estadoPago,
@@ -209,7 +210,7 @@ export default function App() {
         await addDoc(ventasRef, {
           comprador: formVenta.comprador.trim(),
           telefono: formVenta.telefono.trim(),
-          cantidad: Number(formVenta.cantidad),
+          cantidad: cantNumerica,
           montoTotal: totalMonto,
           metodoPago: formVenta.metodoPago,
           estadoPago: formVenta.estadoPago,
@@ -244,9 +245,7 @@ export default function App() {
   const executeDelete = async (id) => {
     setDeletingId(id);
     try {
-      // Remover optimistamente de forma local
       setVentas(prev => prev.filter(v => v.id !== id));
-      
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
       await deleteDoc(docRef);
     } catch (err) {
@@ -1019,13 +1018,17 @@ export default function App() {
                     Cantidad de Entradas
                   </label>
                   <input
-                    type="number"
-                    min="1"
-                    max="50"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
-                    value={formVenta.cantidad}
-                    onChange={(e) => setFormVenta({ ...formVenta, cantidad: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 focus:outline-none font-extrabold"
+                    value={formVenta.cantidad === 0 ? '' : formVenta.cantidad}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setFormVenta({ ...formVenta, cantidad: val === '' ? 0 : parseInt(val, 10) });
+                    }}
+                    placeholder="Escribe la cantidad"
+                    className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 focus:outline-none font-extrabold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
 
@@ -1034,7 +1037,7 @@ export default function App() {
                     Monto Total ($)
                   </label>
                   <div className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-amber-300 font-black flex items-center justify-between">
-                    <span>${formVenta.cantidad * PRECIO_ENTRADA_FIX}</span>
+                    <span>${(formVenta.cantidad || 0) * PRECIO_ENTRADA_FIX}</span>
                     <span className="text-[10px] text-slate-500 font-normal">($5 c/u)</span>
                   </div>
                 </div>
