@@ -938,6 +938,7 @@ export default function App() {
                 {editingVenta ? 'Editar Entrada' : 'Registrar Nueva Venta ($5)'}
               </h3>
               <button
+                type="button"
                 onClick={() => setModalNuevaVenta(false)}
                 className="p-1 text-slate-400 hover:text-amber-300"
               >
@@ -945,7 +946,7 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitVenta} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
                   Nombre del Comprador *
@@ -1044,13 +1045,17 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    handleSubmitVenta();
+                  }}
                   onClick={handleSubmitVenta}
-                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all cursor-pointer"
+                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
                 >
                   {editingVenta ? 'Guardar Cambios' : 'Registrar Venta'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
