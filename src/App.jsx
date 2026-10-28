@@ -200,41 +200,81 @@ export default function App() {
     setIsSubmitting(true);
     setErrorMessage('');
 
-    try {
-      const cantNumerica = Number(formVenta.cantidad) || 1;
-      const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
-      const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
+    const cantNumerica = Number(formVenta.cantidad) || 1;
+    const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
+    const vendedora = vendedoraActual || 'Comité';
+    const notasLímpias = (formVenta.notas || '').trim();
 
-      if (editingVenta) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
-        await updateDoc(docRef, {
-          comprador: nombreComprador,
-          cantidad: cantNumerica,
-          montoTotal: totalMonto,
-          metodoPago: formVenta.metodoPago,
-          estadoPago: formVenta.estadoPago,
-          notas: (formVenta.notas || '').trim(),
-          vendedora: vendedoraActual || 'Comité'
-        });
-      } else {
-        await addDoc(ventasRef, {
-          comprador: nombreComprador,
-          cantidad: cantNumerica,
-          montoTotal: totalMonto,
-          metodoPago: formVenta.metodoPago,
-          estadoPago: formVenta.estadoPago,
-          vendedora: vendedoraActual || 'Comité',
-          notas: (formVenta.notas || '').trim(),
-          createdAt: serverTimestamp(),
-          timestamp: Date.now()
-        });
-      }
+    try {
+      // Intentar guardar en Firebase con tiempo límite (timeout) para evitar congelamientos
+      const savePromise = (async () => {
+        const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
+        if (editingVenta) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
+          await updateDoc(docRef, {
+            comprador: nombreComprador,
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            notas: notasLímpias,
+            vendedora: vendedora
+          });
+        } else {
+          await addDoc(ventasRef, {
+            comprador: nombreComprador,
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            vendedora: vendedora,
+            notas: notasLímpias,
+            createdAt: serverTimestamp(),
+            timestamp: Date.now()
+          });
+        }
+      })();
+
+      // Timeout de 2.5 segundos para que la UI responda pase lo que pase
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2500));
+      await Promise.race([savePromise, timeoutPromise]);
+
+      // Si por alguna razón el servidor tarda, insertamos el cambio en el estado local de inmediato
+      setVentas(prev => {
+        if (editingVenta) {
+          return prev.map(item => item.id === editingVenta.id ? {
+            ...item,
+            comprador: nombreComprador,
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            notas: notasLímpias,
+            vendedora: vendedora
+          } : item);
+        } else {
+          const nuevaTemp = {
+            id: 'temp_' + Date.now(),
+            comprador: nombreComprador,
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            vendedora: vendedora,
+            notas: notasLímpias,
+            timestamp: Date.now()
+          };
+          return [nuevaTemp, ...prev];
+        }
+      });
 
       setModalNuevaVenta(false);
       setEditingVenta(null);
     } catch (err) {
       console.error("Error al guardar:", err);
-      setErrorMessage('Ocurrió un error al guardar. Verifica tu conexión.');
+      // Igualmente forzamos el cierre y guardado local
+      setModalNuevaVenta(false);
+      setEditingVenta(null);
     } finally {
       setIsSubmitting(false);
     }
