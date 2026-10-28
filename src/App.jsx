@@ -179,47 +179,55 @@ export default function App() {
   };
 
   // Guardar Venta (Crear o Editar)
-  const handleSubmitVenta = async (e) => {
-    e.preventDefault();
-    if (!formVenta.comprador.trim()) {
+  const handleSubmitVenta = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (!formVenta.comprador || !formVenta.comprador.trim()) {
       return;
     }
 
-    try {
-      const cantNumerica = Number(formVenta.cantidad) || 1;
-      const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
-      const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
+    const guardarDatosAsync = async () => {
+      try {
+        const cantNumerica = Number(formVenta.cantidad) || 1;
+        const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
+        const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
 
-      if (editingVenta) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
-        await updateDoc(docRef, {
-          comprador: formVenta.comprador.trim(),
-          cantidad: cantNumerica,
-          montoTotal: totalMonto,
-          metodoPago: formVenta.metodoPago,
-          estadoPago: formVenta.estadoPago,
-          notas: formVenta.notas.trim(),
-          vendedora: vendedoraActual || 'Comité'
-        });
-      } else {
-        await addDoc(ventasRef, {
-          comprador: formVenta.comprador.trim(),
-          cantidad: cantNumerica,
-          montoTotal: totalMonto,
-          metodoPago: formVenta.metodoPago,
-          estadoPago: formVenta.estadoPago,
-          vendedora: vendedoraActual || 'Comité',
-          notas: formVenta.notas.trim(),
-          createdAt: serverTimestamp(),
-          timestamp: Date.now()
-        });
+        if (editingVenta) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
+          await updateDoc(docRef, {
+            comprador: formVenta.comprador.trim(),
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            notas: formVenta.notas.trim(),
+            vendedora: vendedoraActual || 'Comité'
+          });
+        } else {
+          await addDoc(ventasRef, {
+            comprador: formVenta.comprador.trim(),
+            cantidad: cantNumerica,
+            montoTotal: totalMonto,
+            metodoPago: formVenta.metodoPago,
+            estadoPago: formVenta.estadoPago,
+            vendedora: vendedoraActual || 'Comité',
+            notas: formVenta.notas.trim(),
+            createdAt: serverTimestamp(),
+            timestamp: Date.now()
+          });
+        }
+
+        setModalNuevaVenta(false);
+        setEditingVenta(null);
+      } catch (err) {
+        console.error("Error al guardar:", err);
       }
+    };
 
-      setModalNuevaVenta(false);
-      setEditingVenta(null);
-    } catch (err) {
-      console.error("Error al guardar:", err);
-    }
+    guardarDatosAsync();
   };
 
   // Cambiar estado rápido
@@ -1035,8 +1043,9 @@ export default function App() {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all"
+                  type="button"
+                  onClick={handleSubmitVenta}
+                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all cursor-pointer"
                 >
                   {editingVenta ? 'Guardar Cambios' : 'Registrar Venta'}
                 </button>
