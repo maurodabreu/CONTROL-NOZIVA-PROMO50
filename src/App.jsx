@@ -31,7 +31,6 @@ import {
   Users, 
   Sparkles, 
   X, 
-  Phone, 
   Target, 
   LogOut, 
   Award,
@@ -183,7 +182,6 @@ export default function App() {
   const handleSubmitVenta = async (e) => {
     e.preventDefault();
     if (!formVenta.comprador.trim()) {
-      alert("Por favor ingresa el nombre del comprador.");
       return;
     }
 
@@ -221,7 +219,6 @@ export default function App() {
       setEditingVenta(null);
     } catch (err) {
       console.error("Error al guardar:", err);
-      alert("Ocurrió un problema al guardar la información. Intenta de nuevo.");
     }
   };
 
@@ -246,7 +243,6 @@ export default function App() {
       await deleteDoc(docRef);
     } catch (err) {
       console.error("Error al eliminar documento:", err);
-      alert("No se pudo eliminar el registro en la base de datos.");
     } finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
@@ -358,7 +354,6 @@ export default function App() {
     setTimeout(() => setCopiadoNotif(false), 3000);
   };
 
-  // PANTALLA INICIAL SI NO HA INGRESADO SU NOMBRE
   if (!vendedoraActual) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
@@ -416,7 +411,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 md:pb-8 selection:bg-amber-500 selection:text-slate-950">
       
-      {/* HEADER PRINCIPAL GOLD */}
       <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-md border-b border-amber-500/20">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -436,7 +430,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Botones Header */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
@@ -465,10 +458,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="max-w-5xl mx-auto px-4 pt-4 space-y-6">
 
-        {/* NOTIFICACIÓN COPIADO */}
         {copiadoNotif && (
           <div className="fixed top-16 right-4 z-50 bg-amber-400 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce border border-yellow-200">
             <CheckCircle2 className="w-5 h-5" />
@@ -476,7 +467,6 @@ export default function App() {
           </div>
         )}
 
-        {/* NAVEGACIÓN Y ACCIÓN */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-amber-500/20">
             <button
@@ -512,7 +502,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* CARD BIENVENIDA GOLD */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/30 p-5 md:p-6 shadow-2xl">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -547,16 +536,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* ========================================== */}
-        {/* VISTA 1: DASHBOARD / RESUMEN */}
-        {/* ========================================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             
-            {/* TARJETAS DE MÉTRICAS */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               
-              {/* Recaudado */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Total Recaudado</span>
@@ -574,7 +558,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Entradas Vendidas */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Vendidas</span>
@@ -592,7 +575,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Avance % */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Alcance Meta</span>
@@ -613,7 +595,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Por Cobrar */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Por Cobrar</span>
@@ -633,10 +614,8 @@ export default function App() {
 
             </div>
 
-            {/* SECCIÓN DESGLOSE POR VENDEDORA & ÚLTIMAS VENTAS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* RANKING DE VENDEDORAS GOLD */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-3xl p-5 shadow-xl">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-extrabold text-amber-200 flex items-center gap-2 text-sm md:text-base">
@@ -687,7 +666,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* ÚLTIMOS REGISTROS EN TIEMPO REAL */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-4">
@@ -751,13 +729,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ========================================== */}
-        {/* VISTA 2: LISTA DE ENTRADAS */}
-        {/* ========================================== */}
         {activeTab === 'ventas' && (
           <div className="space-y-4">
             
-            {/* BUSCADOR Y FILTROS */}
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -778,7 +752,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* FILTRO ESTADO */}
               <div className="flex items-center gap-1 bg-slate-900 p-1 border border-amber-500/20 rounded-2xl self-start sm:self-auto">
                 <button
                   onClick={() => setStatusFilter('TODAS')}
@@ -813,7 +786,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* LISTA DE ENTRADAS */}
             {loading ? (
               <div className="text-center py-16 text-amber-400/70 flex flex-col items-center gap-2">
                 <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
@@ -833,7 +805,6 @@ export default function App() {
                     className="bg-slate-900 border border-amber-500/20 hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg transition-all"
                   >
                     <div>
-                      {/* Cabecera Tarjeta */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <h4 className="font-extrabold text-slate-100 text-sm md:text-base">
@@ -841,7 +812,6 @@ export default function App() {
                           </h4>
                         </div>
 
-                        {/* Toggle Estado */}
                         <button
                           onClick={(e) => toggleEstadoPago(e, item)}
                           className={`px-2.5 py-1 rounded-xl text-[10px] font-extrabold flex items-center gap-1 border transition-transform active:scale-95 ${
@@ -860,7 +830,6 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* Detalle */}
                       <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 mt-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
                         <div>
                           <span className="text-[10px] text-slate-500 block">Entradas / Total</span>
@@ -872,7 +841,7 @@ export default function App() {
                           <span className="text-[10px] text-slate-500 block">Método de Pago</span>
                           <span className="font-bold text-slate-200">{item.metodoPago || 'Binance'}</span>
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <span className="text-[10px] text-slate-500 block">Registrado Por</span>
                           <span className="font-bold text-amber-200/90">{item.vendedora || 'Comité'}</span>
                         </div>
@@ -885,7 +854,6 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* Acciones Editar / Eliminar */}
                     <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                       <span className="text-[10px] text-slate-500">
                         {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
@@ -901,7 +869,6 @@ export default function App() {
                           <Edit3 className="w-4 h-4" />
                         </button>
 
-                        {/* MODO CONFIRMACIÓN INLINE DE ELIMINACIÓN */}
                         {confirmDeleteId === item.id ? (
                           <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 p-1 rounded-xl">
                             <button
@@ -945,7 +912,6 @@ export default function App() {
 
       </main>
 
-      {/* BOTÓN FLOTANTE REGISTRAR PARA MÓVIL */}
       <div className="fixed bottom-6 right-6 md:hidden z-40">
         <button
           onClick={handleOpenNuevaVenta}
@@ -955,7 +921,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* MODAL REGISTRO / EDICIÓN */}
       {modalNuevaVenta && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1002,7 +967,7 @@ export default function App() {
                       const val = e.target.value.replace(/\D/g, '');
                       setFormVenta({ ...formVenta, cantidad: val === '' ? 0 : parseInt(val, 10) });
                     }}
-                    placeholder="Escribe la cantidad"
+                    placeholder="Cantidad"
                     className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 focus:outline-none font-extrabold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
@@ -1081,7 +1046,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL CONFIGURACIÓN META */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
