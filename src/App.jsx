@@ -64,9 +64,8 @@ const META_ENTRADAS_DEF = 600; // Meta de 600 entradas
 export default function App() {
   // Estado de Usuario & Autenticación
   const [user, setUser] = useState(null);
-  const [vendedoraActual, setVendedoraActual] = useState(
-    () => localStorage.getItem('vendedora_noziva') || ''
-  );
+  // Al abrir la app, la sesión inicia siempre vacía para solicitar el nombre
+  const [vendedoraActual, setVendedoraActual] = useState('');
   const [inputNombreTemp, setInputNombreTemp] = useState('');
 
   // Cargar ventas desde localStorage inmediatamente para evitar pantallas en blanco o "cargando..." infinitos
@@ -185,7 +184,7 @@ export default function App() {
     const limpio = nombre.trim();
     if (!limpio) return;
     setVendedoraActual(limpio);
-    localStorage.setItem('vendedora_noziva', limpio);
+    // Ya no guardamos la vendedora en localStorage para que al abrir nuevamente siempre pida el nombre
   };
 
   // Abrir modal de nueva venta
