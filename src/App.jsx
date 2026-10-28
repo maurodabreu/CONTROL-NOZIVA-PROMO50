@@ -69,10 +69,26 @@ export default function App() {
   );
   const [inputNombreTemp, setInputNombreTemp] = useState('');
 
-  // Estados de datos
-  const [ventas, setVentas] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
+  // Cargar ventas desde localStorage inmediatamente para evitar pantallas en blanco o "cargando..." infinitos
+  const [ventas, setVentas] = useState(() => {
+    try {
+      const local = localStorage.getItem('noziva_ventas_cache');
+      return local ? JSON.parse(local) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(false);
+
+  // Sincronizar ventas con localStorage siempre que cambien
+  useEffect(() => {
+    try {
+      localStorage.setItem('noziva_ventas_cache', JSON.stringify(ventas));
+    } catch (e) {
+      console.error("Error guardando cache local:", e);
+    }
+  }, [ventas]);
+
   // Configuraciones editables
   const [metaEntradas, setMetaEntradas] = useState(META_ENTRADAS_DEF);
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -125,33 +141,38 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Suscripción en Tiempo Real a las Ventas
+  // 2. Suscripción en Tiempo Real a las Ventas (con fusión inteligente con LocalStorage)
   useEffect(() => {
     if (!user) return;
 
-    setLoading(true);
     const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
 
     const unsubscribe = onSnapshot(
       ventasRef,
       (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        // Ordenar por fecha reciente
-        docs.sort((a, b) => {
-          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.timestamp || 0);
-          const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.timestamp || 0);
-          return tB - tA;
-        });
+        if (!snapshot.empty) {
+          const docs = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          docs.sort((a, b) => {
+            const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.timestamp || 0);
+            const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.timestamp || 0);
+            return tB - tA;
+          });
 
-        setVentas(docs);
+          setVentas(prevLocal => {
+            // Unir datos de Firebase con ventas locales no sincronizadas todavía
+            const firebaseIds = new Set(docs.map(d => d.id));
+            const pendientesLocal = prevLocal.filter(v => v.id.startsWith('temp_') && !firebaseIds.has(v.id));
+            return [...pendientesLocal, ...docs];
+          });
+        }
         setLoading(false);
       },
       (err) => {
-        console.error("Error al obtener datos:", err);
+        console.warn("Firebase snapshot listener advertencia:", err);
         setLoading(false);
       }
     );
@@ -182,7 +203,7 @@ export default function App() {
     setModalNuevaVenta(true);
   };
 
-  // Guardar Venta (Crear o Editar)
+  // Guardar Venta (Garantía Local Inmediata + Sincronización en Nube)
   const handleSubmitVenta = async (e) => {
     if (e) {
       e.preventDefault();
@@ -203,107 +224,104 @@ export default function App() {
     const cantNumerica = Number(formVenta.cantidad) || 1;
     const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
     const vendedora = vendedoraActual || 'Comité';
-    const notasLímpias = (formVenta.notas || '').trim();
+    const notasLimpias = (formVenta.notas || '').trim();
+    const tempId = editingVenta ? editingVenta.id : 'temp_' + Date.now();
 
+    const objetoVenta = {
+      id: tempId,
+      comprador: nombreComprador,
+      cantidad: cantNumerica,
+      montoTotal: totalMonto,
+      metodoPago: formVenta.metodoPago,
+      estadoPago: formVenta.estadoPago,
+      vendedora: vendedora,
+      notas: notasLimpias,
+      timestamp: Date.now()
+    };
+
+    // 1. Guardar de forma instantánea en el estado local y memoria del teléfono
+    setVentas(prev => {
+      let actualizadas;
+      if (editingVenta) {
+        actualizadas = prev.map(item => item.id === editingVenta.id ? { ...item, ...objetoVenta } : item);
+      } else {
+        actualizadas = [objetoVenta, ...prev];
+      }
+      try {
+        localStorage.setItem('noziva_ventas_cache', JSON.stringify(actualizadas));
+      } catch (err) {}
+      return actualizadas;
+    });
+
+    // Cerrar el modal inmediatamente para que el usuario continúe usando la app
+    setModalNuevaVenta(false);
+    setEditingVenta(null);
+    setIsSubmitting(false);
+
+    // 2. Intentar guardar en Firebase de fondo sin bloquear la aplicación
     try {
-      // Intentar guardar en Firebase con tiempo límite (timeout) para evitar congelamientos
-      const savePromise = (async () => {
-        const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
-        if (editingVenta) {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
-          await updateDoc(docRef, {
-            comprador: nombreComprador,
-            cantidad: cantNumerica,
-            montoTotal: totalMonto,
-            metodoPago: formVenta.metodoPago,
-            estadoPago: formVenta.estadoPago,
-            notas: notasLímpias,
-            vendedora: vendedora
-          });
-        } else {
-          await addDoc(ventasRef, {
-            comprador: nombreComprador,
-            cantidad: cantNumerica,
-            montoTotal: totalMonto,
-            metodoPago: formVenta.metodoPago,
-            estadoPago: formVenta.estadoPago,
-            vendedora: vendedora,
-            notas: notasLímpias,
-            createdAt: serverTimestamp(),
-            timestamp: Date.now()
-          });
-        }
-      })();
-
-      // Timeout de 2.5 segundos para que la UI responda pase lo que pase
-      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2500));
-      await Promise.race([savePromise, timeoutPromise]);
-
-      // Si por alguna razón el servidor tarda, insertamos el cambio en el estado local de inmediato
-      setVentas(prev => {
-        if (editingVenta) {
-          return prev.map(item => item.id === editingVenta.id ? {
-            ...item,
-            comprador: nombreComprador,
-            cantidad: cantNumerica,
-            montoTotal: totalMonto,
-            metodoPago: formVenta.metodoPago,
-            estadoPago: formVenta.estadoPago,
-            notas: notasLímpias,
-            vendedora: vendedora
-          } : item);
-        } else {
-          const nuevaTemp = {
-            id: 'temp_' + Date.now(),
-            comprador: nombreComprador,
-            cantidad: cantNumerica,
-            montoTotal: totalMonto,
-            metodoPago: formVenta.metodoPago,
-            estadoPago: formVenta.estadoPago,
-            vendedora: vendedora,
-            notas: notasLímpias,
-            timestamp: Date.now()
-          };
-          return [nuevaTemp, ...prev];
-        }
-      });
-
-      setModalNuevaVenta(false);
-      setEditingVenta(null);
+      const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
+      if (editingVenta && !editingVenta.id.startsWith('temp_')) {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
+        await updateDoc(docRef, {
+          comprador: nombreComprador,
+          cantidad: cantNumerica,
+          montoTotal: totalMonto,
+          metodoPago: formVenta.metodoPago,
+          estadoPago: formVenta.estadoPago,
+          notas: notasLimpias,
+          vendedora: vendedora
+        });
+      } else {
+        await addDoc(ventasRef, {
+          comprador: nombreComprador,
+          cantidad: cantNumerica,
+          montoTotal: totalMonto,
+          metodoPago: formVenta.metodoPago,
+          estadoPago: formVenta.estadoPago,
+          vendedora: vendedora,
+          notas: notasLimpias,
+          createdAt: serverTimestamp(),
+          timestamp: Date.now()
+        });
+      }
     } catch (err) {
-      console.error("Error al guardar:", err);
-      // Igualmente forzamos el cierre y guardado local
-      setModalNuevaVenta(false);
-      setEditingVenta(null);
-    } finally {
-      setIsSubmitting(false);
+      console.warn("Guardado local exitoso. Sincronización en nube diferida:", err);
     }
   };
 
   // Cambiar estado rápido
   const toggleEstadoPago = async (e, item) => {
     if (e) e.stopPropagation();
+    const nuevoEstado = item.estadoPago === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
+    
+    // Actualizar localmente de inmediato
+    setVentas(prev => prev.map(v => v.id === item.id ? { ...v, estadoPago: nuevoEstado } : v));
+
     try {
-      const nuevoEstado = item.estadoPago === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', item.id);
-      await updateDoc(docRef, { estadoPago: nuevoEstado });
+      if (!item.id.startsWith('temp_')) {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', item.id);
+        await updateDoc(docRef, { estadoPago: nuevoEstado });
+      }
     } catch (err) {
-      console.error("Error al cambiar estado:", err);
+      console.error("Error al cambiar estado en nube:", err);
     }
   };
 
   // Eliminación Inline Directa
   const executeDelete = async (id) => {
     setDeletingId(id);
+    setVentas(prev => prev.filter(v => v.id !== id));
+    setConfirmDeleteId(null);
+    setDeletingId(null);
+
     try {
-      setVentas(prev => prev.filter(v => v.id !== id));
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
-      await deleteDoc(docRef);
+      if (!id.startsWith('temp_')) {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
+        await deleteDoc(docRef);
+      }
     } catch (err) {
-      console.error("Error al eliminar documento:", err);
-    } finally {
-      setDeletingId(null);
-      setConfirmDeleteId(null);
+      console.error("Error al eliminar de la nube:", err);
     }
   };
 
