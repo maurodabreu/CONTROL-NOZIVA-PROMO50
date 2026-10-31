@@ -594,7 +594,7 @@ export default function App() {
                   <span>Verificando...</span>
                 </>
               ) : (
-                <span>{authTab === 'login' ? 'Entrar a la Nube' : 'Registrar Miembro'}</span>
+                <span>{authTab === 'login' ? 'Entrar' : 'Registrar Miembro'}</span>
               )}
             </button>
           </form>
@@ -700,7 +700,7 @@ export default function App() {
               }`}
             >
               <Ticket className="w-4 h-4" />
-              <span>Entradas ({ventas.length})</span>
+              <span>Registros ({ventas.length})</span>
             </button>
           </div>
 
