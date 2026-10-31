@@ -14,7 +14,9 @@ import {
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  setDoc,
+  getDocs
 } from 'firebase/firestore';
 import { 
   DollarSign, 
@@ -36,7 +38,12 @@ import {
   Award,
   Crown,
   RefreshCw,
-  Settings
+  Settings,
+  Lock,
+  UserCheck,
+  UserPlus,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 // ==========================================
@@ -62,31 +69,24 @@ const PRECIO_ENTRADA_FIX = 5; // $5 fijo por entrada
 const META_ENTRADAS_DEF = 600; // Meta de 600 entradas
 
 export default function App() {
-  // Estado de Usuario & Autenticación
+  // Estado de Autenticación Firebase
   const [user, setUser] = useState(null);
-  // Al abrir la app, la sesión inicia siempre vacía para solicitar el nombre
-  const [vendedoraActual, setVendedoraActual] = useState('');
-  const [inputNombreTemp, setInputNombreTemp] = useState('');
+  const [isCloudConnected, setIsCloudConnected] = useState(false);
 
-  // Cargar ventas desde localStorage inmediatamente para evitar pantallas en blanco o "cargando..." infinitos
-  const [ventas, setVentas] = useState(() => {
-    try {
-      const local = localStorage.getItem('noziva_ventas_cache');
-      return local ? JSON.parse(local) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-  const [loading, setLoading] = useState(false);
+  // Sistema de Integrantes / Usuarios con Clave
+  const [vendedoraActual, setVendedoraActual] = useState(null); // Objeto: { nombre, pin }
+  const [miembrosRegistrados, setMiembrosRegistrados] = useState([]);
+  const [authTab, setAuthTab] = useState('login'); // 'login' o 'registro'
+  
+  // Campos de formulario Login / Registro
+  const [authNombre, setAuthNombre] = useState('');
+  const [authPin, setAuthPin] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
 
-  // Sincronizar ventas con localStorage siempre que cambien
-  useEffect(() => {
-    try {
-      localStorage.setItem('noziva_ventas_cache', JSON.stringify(ventas));
-    } catch (e) {
-      console.error("Error guardando cache local:", e);
-    }
-  }, [ventas]);
+  // Ventas globales en tiempo real
+  const [ventas, setVentas] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Configuraciones editables
   const [metaEntradas, setMetaEntradas] = useState(META_ENTRADAS_DEF);
@@ -118,7 +118,7 @@ export default function App() {
     notas: ''
   });
 
-  // 1. Autenticación Anónima / Custom Token
+  // 1. Autenticación Anónima / Custom Token en Firebase
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -128,7 +128,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Error al autenticar:", err);
+        console.error("Error al autenticar en Firebase:", err);
       }
     };
     initAuth();
@@ -140,38 +140,51 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Suscripción en Tiempo Real a las Ventas (con fusión inteligente con LocalStorage)
+  // 2. Suscripción a lista de Miembros (Usuarios del Comité)
+  useEffect(() => {
+    if (!user) return;
+    const miembrosRef = collection(db, 'artifacts', appId, 'public', 'data', 'miembros_comite');
+
+    const unsubscribe = onSnapshot(
+      miembrosRef,
+      (snapshot) => {
+        const lista = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setMiembrosRegistrados(lista);
+      },
+      (err) => console.error("Error cargando miembros:", err)
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 3. Suscripción en Tiempo Real Global a las Ventas (Nube Compartida)
   useEffect(() => {
     if (!user) return;
 
+    setLoading(true);
     const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
 
     const unsubscribe = onSnapshot(
       ventasRef,
       (snapshot) => {
-        if (!snapshot.empty) {
-          const docs = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          
-          docs.sort((a, b) => {
-            const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.timestamp || 0);
-            const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.timestamp || 0);
-            return tB - tA;
-          });
+        setIsCloudConnected(true);
+        const docs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        docs.sort((a, b) => {
+          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.timestamp || 0);
+          const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.timestamp || 0);
+          return tB - tA;
+        });
 
-          setVentas(prevLocal => {
-            // Unir datos de Firebase con ventas locales no sincronizadas todavía
-            const firebaseIds = new Set(docs.map(d => d.id));
-            const pendientesLocal = prevLocal.filter(v => v.id.startsWith('temp_') && !firebaseIds.has(v.id));
-            return [...pendientesLocal, ...docs];
-          });
-        }
+        setVentas(docs);
         setLoading(false);
       },
       (err) => {
-        console.warn("Firebase snapshot listener advertencia:", err);
+        console.error("Error en sincronización en tiempo real:", err);
+        setIsCloudConnected(false);
         setLoading(false);
       }
     );
@@ -179,12 +192,70 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // Guardar integrante activa
-  const guardarNombreVendedora = (nombre) => {
-    const limpio = nombre.trim();
-    if (!limpio) return;
-    setVendedoraActual(limpio);
-    // Ya no guardamos la vendedora en localStorage para que al abrir nuevamente siempre pida el nombre
+  // Manejo de Registro / Login de Integrantes
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsAuthSubmitting(true);
+
+    const nombreLimpio = authNombre.trim();
+    const pinLimpio = authPin.trim();
+
+    if (!nombreLimpio || !pinLimpio) {
+      setAuthError('Ingresa tu nombre y una clave de 4 dígitos.');
+      setIsAuthSubmitting(false);
+      return;
+    }
+
+    try {
+      if (authTab === 'registro') {
+        // Verificar si ya existe ese usuario
+        const existe = miembrosRegistrados.find(
+          m => m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
+        );
+
+        if (existe) {
+          setAuthError('Ese nombre ya está registrado. Selecciónalo en "Ingresar".');
+          setIsAuthSubmitting(false);
+          return;
+        }
+
+        const nuevoMiembro = {
+          nombre: nombreLimpio,
+          pin: pinLimpio,
+          createdAt: serverTimestamp()
+        };
+
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'miembros_comite', nombreLimpio.toLowerCase().replace(/\s+/g, '_'));
+        await setDoc(docRef, nuevoMiembro);
+        
+        setVendedoraActual({ nombre: nombreLimpio, pin: pinLimpio });
+      } else {
+        // Login
+        const integrante = miembrosRegistrados.find(
+          m => m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
+        );
+
+        if (!integrante) {
+          setAuthError('Usuario no encontrado. Por favor regístrate primero.');
+          setIsAuthSubmitting(false);
+          return;
+        }
+
+        if (integrante.pin !== pinLimpio) {
+          setAuthError('Clave incorrecta. Revisa e intenta de nuevo.');
+          setIsAuthSubmitting(false);
+          return;
+        }
+
+        setVendedoraActual({ nombre: integrante.nombre, pin: integrante.pin });
+      }
+    } catch (err) {
+      console.error("Error de autenticación de integrante:", err);
+      setAuthError('Error al conectar con la base de datos. Intenta nuevamente.');
+    } finally {
+      setIsAuthSubmitting(false);
+    }
   };
 
   // Abrir modal de nueva venta
@@ -202,7 +273,7 @@ export default function App() {
     setModalNuevaVenta(true);
   };
 
-  // Guardar Venta (Garantía Local Inmediata + Sincronización en Nube)
+  // Guardar Venta Directamente en la Nube
   const handleSubmitVenta = async (e) => {
     if (e) {
       e.preventDefault();
@@ -222,45 +293,13 @@ export default function App() {
 
     const cantNumerica = Number(formVenta.cantidad) || 1;
     const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
-    const vendedora = vendedoraActual || 'Comité';
+    const vendedora = vendedoraActual?.nombre || 'Comité';
     const notasLimpias = (formVenta.notas || '').trim();
-    const tempId = editingVenta ? editingVenta.id : 'temp_' + Date.now();
 
-    const objetoVenta = {
-      id: tempId,
-      comprador: nombreComprador,
-      cantidad: cantNumerica,
-      montoTotal: totalMonto,
-      metodoPago: formVenta.metodoPago,
-      estadoPago: formVenta.estadoPago,
-      vendedora: vendedora,
-      notas: notasLimpias,
-      timestamp: Date.now()
-    };
-
-    // 1. Guardar de forma instantánea en el estado local y memoria del teléfono
-    setVentas(prev => {
-      let actualizadas;
-      if (editingVenta) {
-        actualizadas = prev.map(item => item.id === editingVenta.id ? { ...item, ...objetoVenta } : item);
-      } else {
-        actualizadas = [objetoVenta, ...prev];
-      }
-      try {
-        localStorage.setItem('noziva_ventas_cache', JSON.stringify(actualizadas));
-      } catch (err) {}
-      return actualizadas;
-    });
-
-    // Cerrar el modal inmediatamente para que el usuario continúe usando la app
-    setModalNuevaVenta(false);
-    setEditingVenta(null);
-    setIsSubmitting(false);
-
-    // 2. Intentar guardar en Firebase de fondo sin bloquear la aplicación
     try {
       const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
-      if (editingVenta && !editingVenta.id.startsWith('temp_')) {
+      
+      if (editingVenta) {
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
         await updateDoc(docRef, {
           comprador: nombreComprador,
@@ -284,8 +323,14 @@ export default function App() {
           timestamp: Date.now()
         });
       }
+
+      setModalNuevaVenta(false);
+      setEditingVenta(null);
     } catch (err) {
-      console.warn("Guardado local exitoso. Sincronización en nube diferida:", err);
+      console.error("Error al guardar venta en la nube:", err);
+      setErrorMessage("No se pudo conectar a la base de datos. Verifica tu internet.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -294,33 +339,25 @@ export default function App() {
     if (e) e.stopPropagation();
     const nuevoEstado = item.estadoPago === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
     
-    // Actualizar localmente de inmediato
-    setVentas(prev => prev.map(v => v.id === item.id ? { ...v, estadoPago: nuevoEstado } : v));
-
     try {
-      if (!item.id.startsWith('temp_')) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', item.id);
-        await updateDoc(docRef, { estadoPago: nuevoEstado });
-      }
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', item.id);
+      await updateDoc(docRef, { estadoPago: nuevoEstado });
     } catch (err) {
-      console.error("Error al cambiar estado en nube:", err);
+      console.error("Error al cambiar estado en la nube:", err);
     }
   };
 
-  // Eliminación Inline Directa
+  // Eliminación Inline Directa en Nube
   const executeDelete = async (id) => {
     setDeletingId(id);
-    setVentas(prev => prev.filter(v => v.id !== id));
-    setConfirmDeleteId(null);
-    setDeletingId(null);
-
     try {
-      if (!id.startsWith('temp_')) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
-        await deleteDoc(docRef);
-      }
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
+      await deleteDoc(docRef);
     } catch (err) {
       console.error("Error al eliminar de la nube:", err);
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
     }
   };
 
@@ -430,6 +467,7 @@ export default function App() {
     setTimeout(() => setCopiadoNotif(false), 3000);
   };
 
+  // PANTALLA DE AUTENTICACIÓN POR INTEGRANTE (REGISTRO / LOGIN CON PIN)
   if (!vendedoraActual) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
@@ -443,40 +481,120 @@ export default function App() {
 
           <div>
             <span className="inline-block px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest bg-amber-500/10 text-amber-300 border border-amber-500/30 mb-2">
-              PROMO 50 • GOLD PROMO
+              PROMO 50 • GOLD COMITÉ
             </span>
             <h1 className="text-xl font-black text-amber-100 leading-snug">
               Control Entradas Fiesta Pro Fondos<br />NOZIVA - 06/11/2026
             </h1>
             <p className="text-slate-400 text-xs mt-2">
-              Ingresa tu nombre para registrar las entradas a tu nombre
+              Accede con tu usuario y clave para sincronizar en tiempo real
             </p>
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              guardarNombreVendedora(inputNombreTemp);
-            }}
-            className="space-y-3 text-left"
-          >
-            <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1">
-              Tu Nombre / Miembro del Comité:
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Ej: Anabel, María, Camila..."
-              value={inputNombreTemp}
-              onChange={(e) => setInputNombreTemp(e.target.value)}
-              className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
-            />
+          {/* Selector de Pestaña: Ingresar o Crear Cuenta */}
+          <div className="flex bg-slate-950 p-1 rounded-2xl border border-amber-500/20">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthTab('login');
+                setAuthError('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                authTab === 'login'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-amber-200'
+              }`}
+            >
+              <UserCheck className="w-4 h-4" />
+              <span>Ingresar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAuthTab('registro');
+                setAuthError('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                authTab === 'registro'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-amber-200'
+              }`}
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Crear Usuario</span>
+            </button>
+          </div>
+
+          {authError && (
+            <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-300 text-xs font-bold flex items-center gap-2 text-left">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4 text-left">
+            <div>
+              <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1 block mb-1">
+                Nombre del Miembro:
+              </label>
+
+              {authTab === 'login' && miembrosRegistrados.length > 0 ? (
+                <select
+                  value={authNombre}
+                  onChange={(e) => setAuthNombre(e.target.value)}
+                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 text-sm focus:outline-none"
+                >
+                  <option value="">-- Selecciona tu Nombre --</option>
+                  {miembrosRegistrados.map((m) => (
+                    <option key={m.id} value={m.nombre}>
+                      {m.nombre}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Kiara Rodrigues"
+                  value={authNombre}
+                  onChange={(e) => setAuthNombre(e.target.value)}
+                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1 block mb-1">
+                Contraseña / Clave Secreta:
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-amber-400/60 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  maxLength="8"
+                  placeholder="Ej: 1234"
+                  value={authPin}
+                  onChange={(e) => setAuthPin(e.target.value)}
+                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl pl-10 pr-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
+                />
+              </div>
+            </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-98"
+              disabled={isAuthSubmitting}
+              className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-98 flex items-center justify-center gap-2"
             >
-              Ingresar a la App
+              {isAuthSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Verificando...</span>
+                </>
+              ) : (
+                <span>{authTab === 'login' ? 'Entrar a la Nube' : 'Registrar Miembro'}</span>
+              )}
             </button>
           </form>
         </div>
@@ -487,6 +605,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 md:pb-8 selection:bg-amber-500 selection:text-slate-950">
       
+      {/* HEADER PRINCIPAL GOLD */}
       <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-md border-b border-amber-500/20">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -499,13 +618,24 @@ export default function App() {
                   Control Entradas Fiesta Pro Fondos - NOZIVA - 06/11/2026
                 </h1>
               </div>
-              <p className="text-[11px] text-amber-400/80 font-medium flex items-center gap-1">
+              <p className="text-[11px] text-amber-400/80 font-medium flex items-center gap-2">
                 <Sparkles className="w-3 h-3 inline text-amber-400" />
                 <span>GOLD PROMO 50 • Entrada: $5</span>
+                <span className="text-slate-600">•</span>
+                {isCloudConnected ? (
+                  <span className="text-emerald-400 flex items-center gap-1 font-bold">
+                    <Wifi className="w-3 h-3" /> Nube Conectada
+                  </span>
+                ) : (
+                  <span className="text-rose-400 flex items-center gap-1 font-bold">
+                    <WifiOff className="w-3 h-3" /> Conectando...
+                  </span>
+                )}
               </p>
             </div>
           </div>
 
+          {/* Botones Header */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
@@ -520,22 +650,25 @@ export default function App() {
 
             <button
               onClick={() => {
-                setInputNombreTemp(vendedoraActual);
-                setVendedoraActual('');
+                setVendedoraActual(null);
+                setAuthNombre('');
+                setAuthPin('');
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-amber-500/30 rounded-xl text-xs font-semibold text-amber-200 transition-colors"
-              title="Cambiar integrante"
+              title="Cerrar sesión de vendedora"
             >
               <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span className="max-w-[90px] truncate">{vendedoraActual}</span>
+              <span className="max-w-[90px] truncate">{vendedoraActual?.nombre || 'Comité'}</span>
               <LogOut className="w-3 h-3 text-slate-500 ml-0.5" />
             </button>
           </div>
         </div>
       </header>
 
+      {/* CONTENIDO PRINCIPAL */}
       <main className="max-w-5xl mx-auto px-4 pt-4 space-y-6">
 
+        {/* NOTIFICACIÓN COPIADO */}
         {copiadoNotif && (
           <div className="fixed top-16 right-4 z-50 bg-amber-400 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce border border-yellow-200">
             <CheckCircle2 className="w-5 h-5" />
@@ -543,6 +676,7 @@ export default function App() {
           </div>
         )}
 
+        {/* NAVEGACIÓN Y ACCIÓN */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-amber-500/20">
             <button
@@ -578,11 +712,12 @@ export default function App() {
           </button>
         </div>
 
+        {/* CARD BIENVENIDA GOLD */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/30 p-5 md:p-6 shadow-2xl">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <span className="text-[10px] font-extrabold px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-lg border border-amber-500/30 inline-block mb-2 uppercase tracking-wider">
-                👑 Sesión Gold: {vendedoraActual}
+                👑 Sesión Gold: {vendedoraActual?.nombre || 'Comité'}
               </span>
               <h2 className="text-xl md:text-2xl font-black text-amber-100">
                 Fiesta Pro Fondos NOZIVA
@@ -612,11 +747,16 @@ export default function App() {
           </div>
         </div>
 
+        {/* ========================================== */}
+        {/* VISTA 1: DASHBOARD / RESUMEN */}
+        {/* ========================================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             
+            {/* TARJETAS DE MÉTRICAS */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               
+              {/* Recaudado */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Total Recaudado</span>
@@ -634,6 +774,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Entradas Vendidas */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Vendidas</span>
@@ -651,6 +792,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Avance % */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Alcance Meta</span>
@@ -671,6 +813,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Por Cobrar */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
                   <span>Por Cobrar</span>
@@ -690,8 +833,10 @@ export default function App() {
 
             </div>
 
+            {/* SECCIÓN DESGLOSE POR VENDEDORA & ÚLTIMAS VENTAS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
+              {/* RANKING DE VENDEDORAS GOLD */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-3xl p-5 shadow-xl">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-extrabold text-amber-200 flex items-center gap-2 text-sm md:text-base">
@@ -742,6 +887,7 @@ export default function App() {
                 )}
               </div>
 
+              {/* ÚLTIMOS REGISTROS EN TIEMPO REAL */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-4">
@@ -796,7 +942,7 @@ export default function App() {
 
                 <div className="mt-4 pt-3 border-t border-slate-800 text-center">
                   <p className="text-[11px] text-amber-300/70">
-                    ⚡ Se sincroniza automáticamente para todas las compañeras del comité.
+                    ⚡ Se sincroniza automáticamente en la nube para todas las compañeras del comité.
                   </p>
                 </div>
               </div>
@@ -805,9 +951,13 @@ export default function App() {
           </div>
         )}
 
+        {/* ========================================== */}
+        {/* VISTA 2: LISTA DE ENTRADAS */}
+        {/* ========================================== */}
         {activeTab === 'ventas' && (
           <div className="space-y-4">
             
+            {/* BUSCADOR Y FILTROS */}
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -828,6 +978,7 @@ export default function App() {
                 )}
               </div>
 
+              {/* FILTRO ESTADO */}
               <div className="flex items-center gap-1 bg-slate-900 p-1 border border-amber-500/20 rounded-2xl self-start sm:self-auto">
                 <button
                   onClick={() => setStatusFilter('TODAS')}
@@ -862,6 +1013,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* LISTA DE ENTRADAS */}
             {loading ? (
               <div className="text-center py-16 text-amber-400/70 flex flex-col items-center gap-2">
                 <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
@@ -881,6 +1033,7 @@ export default function App() {
                     className="bg-slate-900 border border-amber-500/20 hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg transition-all"
                   >
                     <div>
+                      {/* Cabecera Tarjeta */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <h4 className="font-extrabold text-slate-100 text-sm md:text-base">
@@ -888,6 +1041,7 @@ export default function App() {
                           </h4>
                         </div>
 
+                        {/* Toggle Estado */}
                         <button
                           onClick={(e) => toggleEstadoPago(e, item)}
                           className={`px-2.5 py-1 rounded-xl text-[10px] font-extrabold flex items-center gap-1 border transition-transform active:scale-95 ${
@@ -906,6 +1060,7 @@ export default function App() {
                         </button>
                       </div>
 
+                      {/* Detalle */}
                       <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 mt-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
                         <div>
                           <span className="text-[10px] text-slate-500 block">Entradas / Total</span>
@@ -930,6 +1085,7 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* Acciones Editar / Eliminar */}
                     <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                       <span className="text-[10px] text-slate-500">
                         {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
@@ -945,6 +1101,7 @@ export default function App() {
                           <Edit3 className="w-4 h-4" />
                         </button>
 
+                        {/* MODO CONFIRMACIÓN INLINE DE ELIMINACIÓN */}
                         {confirmDeleteId === item.id ? (
                           <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 p-1 rounded-xl">
                             <button
@@ -988,6 +1145,7 @@ export default function App() {
 
       </main>
 
+      {/* BOTÓN FLOTANTE REGISTRAR PARA MÓVIL */}
       <div className="fixed bottom-6 right-6 md:hidden z-40">
         <button
           onClick={handleOpenNuevaVenta}
@@ -1131,7 +1289,7 @@ export default function App() {
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Guardando...</span>
+                      <span>Guardando en Nube...</span>
                     </>
                   ) : (
                     <span>{editingVenta ? 'Guardar Cambios' : 'Registrar Venta'}</span>
@@ -1143,6 +1301,7 @@ export default function App() {
         </div>
       )}
 
+      {/* MODAL CONFIGURACIÓN META */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
