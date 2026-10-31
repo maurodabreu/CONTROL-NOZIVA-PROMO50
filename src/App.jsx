@@ -14,8 +14,7 @@ import {
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
-  serverTimestamp,
-  setDoc
+  serverTimestamp 
 } from 'firebase/firestore';
 import { 
   DollarSign, 
@@ -32,21 +31,17 @@ import {
   Users, 
   Sparkles, 
   X, 
+  Phone, 
   Target, 
   LogOut, 
   Award,
   Crown,
   RefreshCw,
-  Settings,
-  Lock,
-  UserCheck,
-  UserPlus,
-  Wifi,
-  WifiOff
+  Settings
 } from 'lucide-react';
 
 // ==========================================
-// CONFIGURACIÓN DE FIREBASE (BASE DE DATOS REAL)
+// CONFIGURACIÓN DE FIREBASE (BASE DE DATOS)
 // ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyCPkvRTmRFX7cjP8Yhoa-z-WvFdPNFRldk",
@@ -60,31 +55,23 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'noziva-fiesta-pro-fondos';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'noziva-fiesta-pro-fondos';
 
 const PRECIO_ENTRADA_FIX = 5; // $5 fijo por entrada
 const META_ENTRADAS_DEF = 600; // Meta de 600 entradas
 
 export default function App() {
-  // Estado de Autenticación Firebase
+  // Estado de Usuario & Autenticación
   const [user, setUser] = useState(null);
-  const [isCloudConnected, setIsCloudConnected] = useState(false);
+  const [vendedoraActual, setVendedoraActual] = useState(
+    () => localStorage.getItem('vendedora_noziva') || ''
+  );
+  const [inputNombreTemp, setInputNombreTemp] = useState('');
 
-  // Sistema de Integrantes / Usuarios con Clave
-  const [vendedoraActual, setVendedoraActual] = useState(null); // Objeto: { nombre, pin }
-  const [miembrosRegistrados, setMiembrosRegistrados] = useState([]);
-  const [authTab, setAuthTab] = useState('login'); // 'login' o 'registro'
-  
-  // Campos de formulario Login / Registro
-  const [authNombre, setAuthNombre] = useState('');
-  const [authPin, setAuthPin] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
-
-  // Ventas globales en tiempo real
+  // Estados de datos
   const [ventas, setVentas] = useState([]);
   const [loading, setLoading] = useState(true);
-
+  
   // Configuraciones editables
   const [metaEntradas, setMetaEntradas] = useState(META_ENTRADAS_DEF);
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -99,8 +86,6 @@ export default function App() {
   const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
   const [editingVenta, setEditingVenta] = useState(null);
   const [copiadoNotif, setCopiadoNotif] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
   
   // Estado para la confirmación de eliminación inline
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -109,13 +94,14 @@ export default function App() {
   // Formulario Estado
   const [formVenta, setFormVenta] = useState({
     comprador: '',
+    telefono: '',
     cantidad: 1,
     metodoPago: 'Binance', // 'Binance' o 'Efectivo'
     estadoPago: 'PAGADO', // PAGADO o PENDIENTE
     notas: ''
   });
 
-  // 1. Autenticación Anónima / Custom Token en Firebase
+  // 1. Autenticación Anónima / Custom Token
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -125,7 +111,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Error al autenticar en Firebase:", err);
+        console.error("Error al autenticar:", err);
       }
     };
     initAuth();
@@ -137,24 +123,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Suscripción a lista de Miembros (Usuarios del Comité)
-  useEffect(() => {
-    if (!user) return;
-    const miembrosRef = collection(db, 'artifacts', appId, 'public', 'data', 'miembros_comite');
-
-    const unsubscribe = onSnapshot(
-      miembrosRef,
-      (snapshot) => {
-        const lista = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setMiembrosRegistrados(lista);
-      },
-      (err) => console.error("Error cargando miembros:", err)
-    );
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // 3. Suscripción en Tiempo Real Global a las Ventas (Nube Compartida)
+  // 2. Suscripción en Tiempo Real a las Ventas
   useEffect(() => {
     if (!user) return;
 
@@ -164,12 +133,12 @@ export default function App() {
     const unsubscribe = onSnapshot(
       ventasRef,
       (snapshot) => {
-        setIsCloudConnected(true);
         const docs = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         
+        // Ordenar por fecha reciente
         docs.sort((a, b) => {
           const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.timestamp || 0);
           const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.timestamp || 0);
@@ -180,8 +149,7 @@ export default function App() {
         setLoading(false);
       },
       (err) => {
-        console.error("Error en sincronización en tiempo real:", err);
-        setIsCloudConnected(false);
+        console.error("Error al obtener datos:", err);
         setLoading(false);
       }
     );
@@ -189,138 +157,62 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // Manejo de Registro / Login de Integrantes
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setIsAuthSubmitting(true);
-
-    const nombreLimpio = authNombre.trim();
-    const pinLimpio = authPin.trim();
-
-    if (!nombreLimpio || !pinLimpio) {
-      setAuthError('Ingresa tu nombre y una clave de 4 dígitos.');
-      setIsAuthSubmitting(false);
-      return;
-    }
-
-    try {
-      if (authTab === 'registro') {
-        const existe = miembrosRegistrados.find(
-          m => m.nombre && m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
-        );
-
-        if (existe) {
-          setAuthError('Ese nombre ya está registrado. Selecciónalo en "Ingresar".');
-          setIsAuthSubmitting(false);
-          return;
-        }
-
-        const nuevoMiembro = {
-          nombre: nombreLimpio,
-          pin: pinLimpio,
-          createdAt: new Date().toISOString()
-        };
-
-        setMiembrosRegistrados(prev => [...prev, { id: nombreLimpio.toLowerCase().replace(/\s+/g, '_'), ...nuevoMiembro }]);
-        
-        if (user) {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'miembros_comite', nombreLimpio.toLowerCase().replace(/\s+/g, '_'));
-          setDoc(docRef, { ...nuevoMiembro, createdAt: serverTimestamp() }).catch(err => {
-            console.warn("No se pudo respaldar miembro en la nube inmediatamente, guardado local:", err);
-          });
-        }
-        
-        setVendedoraActual({ nombre: nombreLimpio, pin: pinLimpio });
-      } else {
-        const integrante = miembrosRegistrados.find(
-          m => m.nombre && m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
-        );
-
-        if (!integrante) {
-          setAuthError('Usuario no encontrado. Por favor regístrate primero.');
-          setIsAuthSubmitting(false);
-          return;
-        }
-
-        if (integrante.pin !== pinLimpio) {
-          setAuthError('Clave incorrecta. Revisa e intenta de nuevo.');
-          setIsAuthSubmitting(false);
-          return;
-        }
-
-        setVendedoraActual({ nombre: integrante.nombre, pin: integrante.pin });
-      }
-    } catch (err) {
-      console.error("Error de autenticación de integrante:", err);
-      setVendedoraActual({ nombre: nombreLimpio, pin: pinLimpio });
-    }
-    finally {
-      setIsAuthSubmitting(false);
-    }
+  // Guardar integrante activa
+  const guardarNombreVendedora = (nombre) => {
+    const limpio = nombre.trim();
+    if (!limpio) return;
+    setVendedoraActual(limpio);
+    localStorage.setItem('vendedora_noziva', limpio);
   };
 
   // Abrir modal de nueva venta
   const handleOpenNuevaVenta = () => {
     setFormVenta({
       comprador: '',
+      telefono: '',
       cantidad: 1,
       metodoPago: 'Binance',
       estadoPago: 'PAGADO',
       notas: ''
     });
     setEditingVenta(null);
-    setErrorMessage('');
-    setIsSubmitting(false);
     setModalNuevaVenta(true);
   };
 
-  // Guardar Venta Directamente en la Nube
+  // Guardar Venta (Crear o Editar)
   const handleSubmitVenta = async (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    
-    if (isSubmitting) return;
-
-    const nombreComprador = formVenta.comprador ? formVenta.comprador.trim() : '';
-    if (!nombreComprador) {
-      setErrorMessage('Por favor ingresa el nombre del comprador.');
+    e.preventDefault();
+    if (!formVenta.comprador.trim()) {
+      alert("Por favor ingresa el nombre del comprador.");
       return;
     }
 
-    setIsSubmitting(true);
-    setErrorMessage('');
-
-    const cantNumerica = Number(formVenta.cantidad) || 1;
-    const totalMonto = cantNumerica * PRECIO_ENTRADA_FIX;
-    const vendedora = vendedoraActual?.nombre || 'Comité';
-    const notasLimpias = (formVenta.notas || '').trim();
-
     try {
+      const totalMonto = formVenta.cantidad * PRECIO_ENTRADA_FIX;
       const ventasRef = collection(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas');
-      
+
       if (editingVenta) {
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', editingVenta.id);
         await updateDoc(docRef, {
-          comprador: nombreComprador,
-          cantidad: cantNumerica,
+          comprador: formVenta.comprador.trim(),
+          telefono: formVenta.telefono.trim(),
+          cantidad: Number(formVenta.cantidad),
           montoTotal: totalMonto,
           metodoPago: formVenta.metodoPago,
           estadoPago: formVenta.estadoPago,
-          notas: notasLimpias,
-          vendedora: vendedora
+          notas: formVenta.notas.trim(),
+          vendedora: vendedoraActual || 'Comité'
         });
       } else {
         await addDoc(ventasRef, {
-          comprador: nombreComprador,
-          cantidad: cantNumerica,
+          comprador: formVenta.comprador.trim(),
+          telefono: formVenta.telefono.trim(),
+          cantidad: Number(formVenta.cantidad),
           montoTotal: totalMonto,
           metodoPago: formVenta.metodoPago,
           estadoPago: formVenta.estadoPago,
-          vendedora: vendedora,
-          notas: notasLimpias,
+          vendedora: vendedoraActual || 'Comité',
+          notas: formVenta.notas.trim(),
           createdAt: serverTimestamp(),
           timestamp: Date.now()
         });
@@ -329,34 +221,33 @@ export default function App() {
       setModalNuevaVenta(false);
       setEditingVenta(null);
     } catch (err) {
-      console.error("Error al guardar venta en la nube:", err);
-      setErrorMessage("No se pudo conectar a la base de datos. Verifica tu internet.");
-    } finally {
-      setIsSubmitting(false);
+      console.error("Error al guardar:", err);
+      alert("Ocurrió un problema al guardar la información. Intenta de nuevo.");
     }
   };
 
   // Cambiar estado rápido
   const toggleEstadoPago = async (e, item) => {
     if (e) e.stopPropagation();
-    const nuevoEstado = item.estadoPago === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
-    
     try {
+      const nuevoEstado = item.estadoPago === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', item.id);
       await updateDoc(docRef, { estadoPago: nuevoEstado });
     } catch (err) {
-      console.error("Error al cambiar estado en la nube:", err);
+      console.error("Error al cambiar estado:", err);
     }
   };
 
-  // Eliminación Inline Directa en Nube
+  // Eliminación Inline Directa
   const executeDelete = async (id) => {
     setDeletingId(id);
     try {
+      setVentas(prev => prev.filter(v => v.id !== id));
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', id);
       await deleteDoc(docRef);
     } catch (err) {
-      console.error("Error al eliminar de la nube:", err);
+      console.error("Error al eliminar documento:", err);
+      alert("No se pudo eliminar el registro en la base de datos.");
     } finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
@@ -372,12 +263,12 @@ export default function App() {
     setEditingVenta(venta);
     setFormVenta({
       comprador: venta.comprador,
+      telefono: venta.telefono || '',
       cantidad: venta.cantidad,
       metodoPago: venta.metodoPago || 'Binance',
       estadoPago: venta.estadoPago || 'PAGADO',
       notas: venta.notas || ''
     });
-    setErrorMessage('');
     setModalNuevaVenta(true);
   };
 
@@ -442,7 +333,8 @@ export default function App() {
       const query = searchQuery.toLowerCase();
       const coincideBusqueda = 
         v.comprador.toLowerCase().includes(query) ||
-        (v.vendedora && v.vendedora.toLowerCase().includes(query));
+        (v.vendedora && v.vendedora.toLowerCase().includes(query)) ||
+        (v.telefono && v.telefono.includes(query));
 
       if (statusFilter === 'PAGADO') return coincideBusqueda && v.estadoPago === 'PAGADO';
       if (statusFilter === 'PENDIENTE') return coincideBusqueda && v.estadoPago === 'PENDIENTE';
@@ -462,14 +354,14 @@ export default function App() {
       `💵 *Valor Entrada:* $${PRECIO_ENTRADA_FIX} (Binance / Efectivo)\n\n` +
       `🏆 *TOP VENDEDORAS (GOLD COMITÉ):*\n` +
       metricas.rankingVendedoras.slice(0, 5).map((v, i) => `${i + 1}. ${v.nombre}: ${v.entradas} ent. ($${v.recaudado})`).join('\n') +
-      `\n\n¡Seguimos sumando para nuestra fiesta de graduación! 🎓🥂`;
+      `\n\n¡Seguimos sumando para nuestra Fiesta de Revelación de Logo! 🎓🥂`;
 
     navigator.clipboard.writeText(texto);
     setCopiadoNotif(true);
     setTimeout(() => setCopiadoNotif(false), 3000);
   };
 
-  // PANTALLA DE AUTENTICACIÓN POR INTEGRANTE
+  // PANTALLA INICIAL SI NO HA INGRESADO SU NOMBRE
   if (!vendedoraActual) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
@@ -483,119 +375,40 @@ export default function App() {
 
           <div>
             <span className="inline-block px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest bg-amber-500/10 text-amber-300 border border-amber-500/30 mb-2">
-              PROMO 50 • GOLD COMITÉ
+              PROMO 50 • GOLD PROMO
             </span>
             <h1 className="text-xl font-black text-amber-100 leading-snug">
               Control Entradas Fiesta Pro Fondos<br />NOZIVA - 06/11/2026
             </h1>
             <p className="text-slate-400 text-xs mt-2">
-              Accede con tu usuario y clave para sincronizar en tiempo real
+              Ingresa tu nombre para registrar las entradas a tu nombre
             </p>
           </div>
 
-          <div className="flex bg-slate-950 p-1 rounded-2xl border border-amber-500/20">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthTab('login');
-                setAuthError('');
-              }}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                authTab === 'login'
-                  ? 'bg-amber-500 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-amber-200'
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>Ingresar</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setAuthTab('registro');
-                setAuthError('');
-              }}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                authTab === 'registro'
-                  ? 'bg-amber-500 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-amber-200'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Crear Usuario</span>
-            </button>
-          </div>
-
-          {authError && (
-            <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-300 text-xs font-bold flex items-center gap-2 text-left">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{authError}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleAuthSubmit} className="space-y-4 text-left">
-            <div>
-              <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1 block mb-1">
-                Nombre del Miembro:
-              </label>
-
-              {authTab === 'login' && miembrosRegistrados.length > 0 ? (
-                <select
-                  value={authNombre}
-                  onChange={(e) => setAuthNombre(e.target.value)}
-                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 text-sm focus:outline-none"
-                >
-                  <option value="">-- Selecciona tu Nombre --</option>
-                  {miembrosRegistrados.map((m) => (
-                    <option key={m.id} value={m.nombre}>
-                      {m.nombre}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Kiara Rodrigues"
-                  value={authNombre}
-                  onChange={(e) => setAuthNombre(e.target.value)}
-                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
-                />
-              )}
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1 block mb-1">
-                Contraseña / Clave Secreta:
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-amber-400/60 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  required
-                  maxLength="8"
-                  placeholder="Ej: 1234"
-                  value={authPin}
-                  onChange={(e) => setAuthPin(e.target.value)}
-                  className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl pl-10 pr-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
-                />
-              </div>
-            </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              guardarNombreVendedora(inputNombreTemp);
+            }}
+            className="space-y-3 text-left"
+          >
+            <label className="text-xs font-semibold text-amber-300/80 uppercase tracking-wider pl-1">
+              Tu Nombre / Miembro del Comité:
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="Ej: Anabel, María, Camila..."
+              value={inputNombreTemp}
+              onChange={(e) => setInputNombreTemp(e.target.value)}
+              className="w-full bg-slate-950 border border-amber-500/30 focus:border-amber-400 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 text-sm focus:outline-none transition-colors"
+            />
 
             <button
               type="submit"
-              disabled={isAuthSubmitting}
-              className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-98 flex items-center justify-center gap-2"
+              className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-98"
             >
-              {isAuthSubmitting ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Verificando...</span>
-                </>
-              ) : (
-                <span>{authTab === 'login' ? 'Entrar' : 'Registrar Miembro'}</span>
-              )}
+              Entrar
             </button>
           </form>
         </div>
@@ -619,19 +432,13 @@ export default function App() {
                   Control Entradas Fiesta Pro Fondos - NOZIVA - 06/11/2026
                 </h1>
               </div>
-              <p className="text-[11px] text-amber-400/80 font-medium flex items-center gap-2">
+              <p className="text-[11px] text-amber-400/80 font-medium flex items-center gap-1">
                 <Sparkles className="w-3 h-3 inline text-amber-400" />
-                <span>GOLD PROMO 50 • Entrada: $5</span>
-                <span className="text-slate-600">•</span>
-                {isCloudConnected ? (
-                  <span className="text-emerald-400 flex items-center gap-1 font-bold">
-                    <Wifi className="w-3 h-3" /> Nube Conectada
-                  </span>
-                ) : (
-                  <span className="text-rose-400 flex items-center gap-1 font-bold">
-                    <WifiOff className="w-3 h-3" /> Conectando...
-                  </span>
-                )}
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Nube Conectada
+                </span>
+                <span>• GOLD PROMO 50 • Entrada: $5</span>
               </p>
             </div>
           </div>
@@ -651,15 +458,14 @@ export default function App() {
 
             <button
               onClick={() => {
-                setVendedoraActual(null);
-                setAuthNombre('');
-                setAuthPin('');
+                setInputNombreTemp(vendedoraActual);
+                setVendedoraActual('');
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-amber-500/30 rounded-xl text-xs font-semibold text-amber-200 transition-colors"
-              title="Cerrar sesión de vendedora"
+              title="Cambiar integrante"
             >
               <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span className="max-w-[90px] truncate">{vendedoraActual?.nombre || 'Comité'}</span>
+              <span className="max-w-[90px] truncate">{vendedoraActual}</span>
               <LogOut className="w-3 h-3 text-slate-500 ml-0.5" />
             </button>
           </div>
@@ -718,7 +524,7 @@ export default function App() {
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <span className="text-[10px] font-extrabold px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-lg border border-amber-500/30 inline-block mb-2 uppercase tracking-wider">
-                👑 Sesión Gold: {vendedoraActual?.nombre || 'Comité'}
+                👑 Sesión Gold: {vendedoraActual}
               </span>
               <h2 className="text-xl md:text-2xl font-black text-amber-100">
                 Fiesta Pro Fondos NOZIVA
@@ -748,7 +554,9 @@ export default function App() {
           </div>
         </div>
 
+        {/* ========================================== */}
         {/* VISTA 1: DASHBOARD / RESUMEN */}
+        {/* ========================================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             
@@ -941,7 +749,7 @@ export default function App() {
 
                 <div className="mt-4 pt-3 border-t border-slate-800 text-center">
                   <p className="text-[11px] text-amber-300/70">
-                    ⚡ Se sincroniza automáticamente en la nube para todas las compañeras del comité.
+                    ⚡ Se sincroniza automáticamente para todas las compañeras del comité.
                   </p>
                 </div>
               </div>
@@ -950,7 +758,9 @@ export default function App() {
           </div>
         )}
 
-        {/* VISTA 2: LISTA DE ENTRADAS */}
+        {/* ========================================== */}
+        {/* VISTA 2: LISTA DE REGISTROS */}
+        {/* ========================================== */}
         {activeTab === 'ventas' && (
           <div className="space-y-4">
             
@@ -960,7 +770,7 @@ export default function App() {
                 <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar por comprador o vendedora..."
+                  placeholder="Buscar por comprador, vendedora o teléfono..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full bg-slate-900 border border-amber-500/20 rounded-2xl pl-10 pr-4 py-2.5 text-xs md:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
@@ -1069,7 +879,26 @@ export default function App() {
                           <span className="text-[10px] text-slate-500 block">Método de Pago</span>
                           <span className="font-bold text-slate-200">{item.metodoPago || 'Binance'}</span>
                         </div>
-                        <div className="col-span-2">
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">Teléfono / WhatsApp</span>
+                          <span className="font-semibold text-slate-200">
+                            {item.telefono ? (
+                              <a
+                                href={`https://wa.me/${item.telefono.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                              >
+                                <Phone className="w-3 h-3 inline" />
+                                {item.telefono}
+                              </a>
+                            ) : (
+                              'No registrado'
+                            )}
+                          </span>
+                        </div>
+                        <div>
                           <span className="text-[10px] text-slate-500 block">Registrado Por</span>
                           <span className="font-bold text-amber-200/90">{item.vendedora || 'Comité'}</span>
                         </div>
@@ -1162,7 +991,6 @@ export default function App() {
                 {editingVenta ? 'Editar Entrada' : 'Registrar Nueva Venta ($5)'}
               </h3>
               <button
-                type="button"
                 onClick={() => setModalNuevaVenta(false)}
                 className="p-1 text-slate-400 hover:text-amber-300"
               >
@@ -1170,14 +998,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="space-y-4">
-              {errorMessage && (
-                <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-300 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{errorMessage}</span>
-                </div>
-              )}
-
+            <form onSubmit={handleSubmitVenta} className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
                   Nombre del Comprador *
@@ -1187,10 +1008,7 @@ export default function App() {
                   required
                   placeholder="Ej: Carlos Gómez"
                   value={formVenta.comprador}
-                  onChange={(e) => {
-                    setFormVenta({ ...formVenta, comprador: e.target.value });
-                    if (errorMessage) setErrorMessage('');
-                  }}
+                  onChange={(e) => setFormVenta({ ...formVenta, comprador: e.target.value })}
                   className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 placeholder-slate-600 focus:outline-none"
                 />
               </div>
@@ -1201,17 +1019,13 @@ export default function App() {
                     Cantidad de Entradas
                   </label>
                   <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
+                    type="number"
+                    min="1"
+                    max="50"
                     required
-                    value={formVenta.cantidad === 0 ? '' : formVenta.cantidad}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '');
-                      setFormVenta({ ...formVenta, cantidad: val === '' ? 0 : parseInt(val, 10) });
-                    }}
-                    placeholder="Cantidad"
-                    className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 focus:outline-none font-extrabold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    value={formVenta.cantidad}
+                    onChange={(e) => setFormVenta({ ...formVenta, cantidad: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 focus:outline-none font-extrabold"
                   />
                 </div>
 
@@ -1220,7 +1034,7 @@ export default function App() {
                     Monto Total ($)
                   </label>
                   <div className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-amber-300 font-black flex items-center justify-between">
-                    <span>${(formVenta.cantidad || 0) * PRECIO_ENTRADA_FIX}</span>
+                    <span>${formVenta.cantidad * PRECIO_ENTRADA_FIX}</span>
                     <span className="text-[10px] text-slate-500 font-normal">($5 c/u)</span>
                   </div>
                 </div>
@@ -1258,6 +1072,19 @@ export default function App() {
 
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Teléfono / WhatsApp (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: +584121234567"
+                  value={formVenta.telefono}
+                  onChange={(e) => setFormVenta({ ...formVenta, telefono: e.target.value })}
+                  className="w-full bg-slate-950 border border-amber-500/20 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm text-slate-100 placeholder-slate-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
                   Notas adicionales
                 </label>
                 <input
@@ -1278,22 +1105,13 @@ export default function App() {
                   Cancelar
                 </button>
                 <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={handleSubmitVenta}
-                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                  type="submit"
+                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all"
                 >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Guardando en Nube...</span>
-                    </>
-                  ) : (
-                    <span>{editingVenta ? 'Guardar Cambios' : 'Registrar Venta'}</span>
-                  )}
+                  {editingVenta ? 'Guardar Cambios' : 'Registrar Venta'}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
