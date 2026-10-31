@@ -52,12 +52,12 @@ import {
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
-      apiKey: "demo-api-key",
-      authDomain: "demo-project.firebaseapp.com",
-      projectId: "demo-project",
-      storageBucket: "demo-project.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123456789:web:demo"
+      apiKey: "AIzaSyCPkvRTmRFX7cjP8Yhoa-z-WvFdPNFRldk",
+      authDomain: "noziva-entradaspromo50.firebaseapp.com",
+      projectId: "noziva-entradaspromo50",
+      storageBucket: "noziva-entradaspromo50.firebasestorage.app",
+      messagingSenderId: "778889961321",
+      appId: "1:778889961321:web:9ce02075470c3832c4a7f8"
     };
 
 const app = initializeApp(firebaseConfig);
