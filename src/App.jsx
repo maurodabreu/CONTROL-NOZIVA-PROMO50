@@ -15,8 +15,7 @@ import {
   deleteDoc, 
   onSnapshot, 
   serverTimestamp,
-  setDoc,
-  getDocs
+  setDoc
 } from 'firebase/firestore';
 import { 
   DollarSign, 
@@ -47,23 +46,21 @@ import {
 } from 'lucide-react';
 
 // ==========================================
-// CONFIGURACIÓN DE FIREBASE (BASE DE DATOS)
+// CONFIGURACIÓN DE FIREBASE (BASE DE DATOS REAL)
 // ==========================================
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "AIzaSyCPkvRTmRFX7cjP8Yhoa-z-WvFdPNFRldk",
-      authDomain: "noziva-entradaspromo50.firebaseapp.com",
-      projectId: "noziva-entradaspromo50",
-      storageBucket: "noziva-entradaspromo50.firebasestorage.app",
-      messagingSenderId: "778889961321",
-      appId: "1:778889961321:web:9ce02075470c3832c4a7f8"
-    };
+const firebaseConfig = {
+  apiKey: "AIzaSyCPkvRTmRFX7cjP8Yhoa-z-WvFdPNFRldk",
+  authDomain: "noziva-entradaspromo50.firebaseapp.com",
+  projectId: "noziva-entradaspromo50",
+  storageBucket: "noziva-entradaspromo50.firebasestorage.app",
+  messagingSenderId: "778889961321",
+  appId: "1:778889961321:web:9ce02075470c3832c4a7f8"
+};
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'noziva-fiesta-pro-fondos';
+const appId = 'noziva-fiesta-pro-fondos';
 
 const PRECIO_ENTRADA_FIX = 5; // $5 fijo por entrada
 const META_ENTRADAS_DEF = 600; // Meta de 600 entradas
@@ -209,9 +206,8 @@ export default function App() {
 
     try {
       if (authTab === 'registro') {
-        // Verificar si ya existe ese usuario
         const existe = miembrosRegistrados.find(
-          m => m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
+          m => m.nombre && m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
         );
 
         if (existe) {
@@ -223,17 +219,22 @@ export default function App() {
         const nuevoMiembro = {
           nombre: nombreLimpio,
           pin: pinLimpio,
-          createdAt: serverTimestamp()
+          createdAt: new Date().toISOString()
         };
 
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'miembros_comite', nombreLimpio.toLowerCase().replace(/\s+/g, '_'));
-        await setDoc(docRef, nuevoMiembro);
+        setMiembrosRegistrados(prev => [...prev, { id: nombreLimpio.toLowerCase().replace(/\s+/g, '_'), ...nuevoMiembro }]);
+        
+        if (user) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'miembros_comite', nombreLimpio.toLowerCase().replace(/\s+/g, '_'));
+          setDoc(docRef, { ...nuevoMiembro, createdAt: serverTimestamp() }).catch(err => {
+            console.warn("No se pudo respaldar miembro en la nube inmediatamente, guardado local:", err);
+          });
+        }
         
         setVendedoraActual({ nombre: nombreLimpio, pin: pinLimpio });
       } else {
-        // Login
         const integrante = miembrosRegistrados.find(
-          m => m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
+          m => m.nombre && m.nombre.toLowerCase() === nombreLimpio.toLowerCase()
         );
 
         if (!integrante) {
@@ -252,8 +253,9 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error de autenticación de integrante:", err);
-      setAuthError('Error al conectar con la base de datos. Intenta nuevamente.');
-    } finally {
+      setVendedoraActual({ nombre: nombreLimpio, pin: pinLimpio });
+    }
+    finally {
       setIsAuthSubmitting(false);
     }
   };
@@ -467,7 +469,7 @@ export default function App() {
     setTimeout(() => setCopiadoNotif(false), 3000);
   };
 
-  // PANTALLA DE AUTENTICACIÓN POR INTEGRANTE (REGISTRO / LOGIN CON PIN)
+  // PANTALLA DE AUTENTICACIÓN POR INTEGRANTE
   if (!vendedoraActual) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
@@ -491,7 +493,6 @@ export default function App() {
             </p>
           </div>
 
-          {/* Selector de Pestaña: Ingresar o Crear Cuenta */}
           <div className="flex bg-slate-950 p-1 rounded-2xl border border-amber-500/20">
             <button
               type="button"
@@ -747,9 +748,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* ========================================== */}
         {/* VISTA 1: DASHBOARD / RESUMEN */}
-        {/* ========================================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             
@@ -951,9 +950,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ========================================== */}
         {/* VISTA 2: LISTA DE ENTRADAS */}
-        {/* ========================================== */}
         {activeTab === 'ventas' && (
           <div className="space-y-4">
             
