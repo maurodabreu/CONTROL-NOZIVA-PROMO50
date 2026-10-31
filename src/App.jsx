@@ -601,7 +601,7 @@ export default function App() {
                 type="submit"
                 className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-98"
               >
-                Guardar Usuario en la Nube
+                Crear Usuario
               </button>
             </form>
           )}
