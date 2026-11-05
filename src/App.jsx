@@ -39,7 +39,9 @@ import {
   RefreshCw,
   Settings,
   Lock,
-  UserPlus
+  DoorOpen,
+  UserCheck,
+  Minus
 } from 'lucide-react';
 
 // ==========================================
@@ -92,8 +94,9 @@ export default function App() {
   const [tempMetaInput, setTempMetaInput] = useState(META_ENTRADAS_DEF.toString());
 
   // UI
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'ventas', 'puerta'
   const [searchQuery, setSearchQuery] = useState('');
+  const [puertaSearchQuery, setPuertaSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('TODAS');
   
   // Modales y Notificaciones
@@ -149,6 +152,7 @@ export default function App() {
       (snapshot) => {
         const docs = snapshot.docs.map(doc => ({
           id: doc.id,
+          ingresadas: 0, // valor por defecto si no existe en la BD
           ...doc.data()
         }));
         
@@ -303,6 +307,7 @@ export default function App() {
           estadoPago: formVenta.estadoPago,
           vendedora: vendedoraActual || 'Comité',
           notas: formVenta.notas.trim(),
+          ingresadas: 0,
           createdAt: serverTimestamp(),
           timestamp: Date.now()
         });
@@ -313,6 +318,31 @@ export default function App() {
     } catch (err) {
       console.error("Error al guardar:", err);
       alert("Error al guardar en la nube.");
+    }
+  };
+
+  // Actualizar la cantidad de personas que han ingresado en Puerta
+  const updateIngresadas = async (ventaId, delta, totalCantidad) => {
+    const venta = ventas.find(v => v.id === ventaId);
+    if (!venta) return;
+    const actual = Number(venta.ingresadas) || 0;
+    const nuevaCant = Math.max(0, Math.min(totalCantidad, actual + delta));
+    
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', ventaId);
+      await updateDoc(docRef, { ingresadas: nuevaCant });
+    } catch (err) {
+      console.error("Error al actualizar entradas en puerta:", err);
+    }
+  };
+
+  // Ingresar todas las entradas de una persona en Puerta de un solo clic
+  const setIngresadasTodas = async (ventaId, totalCantidad) => {
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ventas_entradas', ventaId);
+      await updateDoc(docRef, { ingresadas: totalCantidad });
+    } catch (err) {
+      console.error("Error al ingresar todas las entradas:", err);
     }
   };
 
@@ -366,13 +396,16 @@ export default function App() {
     let totalPendienteMonto = 0;
     let entradasPagadas = 0;
     let entradasPendientes = 0;
+    let totalPersonasIngresadas = 0;
     const vendedorasMap = {};
 
     ventas.forEach(v => {
       const cant = Number(v.cantidad) || 0;
       const monto = Number(v.montoTotal) || (cant * PRECIO_ENTRADA_FIX);
+      const ingresadas = Number(v.ingresadas) || 0;
 
       totalEntradasVendidas += cant;
+      totalPersonasIngresadas += ingresadas;
 
       if (v.estadoPago === 'PAGADO') {
         totalRecaudado += monto;
@@ -409,11 +442,12 @@ export default function App() {
       entradasPagadas,
       entradasPendientes,
       porcentajeMeta,
-      rankingVendedoras
+      rankingVendedoras,
+      totalPersonasIngresadas
     };
   }, [ventas, metaEntradas]);
 
-  // Filtros
+  // Filtros Registros
   const ventasFiltradas = useMemo(() => {
     return ventas.filter(v => {
       const query = searchQuery.toLowerCase();
@@ -428,6 +462,18 @@ export default function App() {
     });
   }, [ventas, searchQuery, statusFilter]);
 
+  // Filtros Control de Puerta
+  const ventasPuertaFiltradas = useMemo(() => {
+    return ventas.filter(v => {
+      const query = puertaSearchQuery.toLowerCase();
+      return (
+        v.comprador.toLowerCase().includes(query) ||
+        (v.vendedora && v.vendedora.toLowerCase().includes(query)) ||
+        (v.telefono && v.telefono.includes(query))
+      );
+    });
+  }, [ventas, puertaSearchQuery]);
+
   // WhatsApp Report
   const copiarResumenWhatsApp = () => {
     const texto = `✨ *GOLD PROMO - PROMO 50* ✨\n` +
@@ -436,6 +482,7 @@ export default function App() {
       `-----------------------------------\n` +
       `💰 *Total Recaudado:* $${metricas.totalRecaudado}\n` +
       `🎟️ *Entradas Vendidas:* ${metricas.totalEntradasVendidas} / ${metaEntradas} (${metricas.porcentajeMeta}%)\n` +
+      `🚪 *Personas Ingresadas:* ${metricas.totalPersonasIngresadas} / ${metricas.totalEntradasVendidas}\n` +
       `⏳ *Por Cobrar:* $${metricas.totalPendienteMonto} (${metricas.entradasPendientes} entradas)\n` +
       `💵 *Valor Entrada:* $${PRECIO_ENTRADA_FIX} (Binance / Efectivo)\n\n` +
       `🏆 *TOP VENDEDORAS (GOLD COMITÉ):*\n` +
@@ -673,12 +720,12 @@ export default function App() {
           </div>
         )}
 
-        {/* NAVEGACIÓN Y ACCIÓN */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-amber-500/20">
+        {/* NAVEGACIÓN Y ACCIÓN CON 3 PESTAÑAS */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3 overflow-x-auto">
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-amber-500/20 shrink-0">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${
+              className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-1.5 ${
                 activeTab === 'dashboard'
                   ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-amber-200'
@@ -687,9 +734,10 @@ export default function App() {
               <TrendingUp className="w-4 h-4" />
               <span>Resumen</span>
             </button>
+
             <button
               onClick={() => setActiveTab('ventas')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${
+              className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-1.5 ${
                 activeTab === 'ventas'
                   ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-amber-200'
@@ -698,11 +746,23 @@ export default function App() {
               <Ticket className="w-4 h-4" />
               <span>Registros ({ventas.length})</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('puerta')}
+              className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'puerta'
+                  ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-amber-200'
+              }`}
+            >
+              <DoorOpen className="w-4 h-4" />
+              <span>Puerta / Acceso</span>
+            </button>
           </div>
 
           <button
             onClick={handleOpenNuevaVenta}
-            className="hidden md:flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-95"
+            className="hidden md:flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-95 shrink-0"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
             <span>Nueva Venta ($5)</span>
@@ -789,24 +849,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Avance % */}
+              {/* Ingresadas en Puerta */}
               <div className="bg-slate-900/90 border border-amber-500/20 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                  <span>Alcance Meta</span>
-                  <div className="p-2 rounded-xl bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                    <TrendingUp className="w-4 h-4" />
+                  <span>En la Fiesta</span>
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <UserCheck className="w-4 h-4" />
                   </div>
                 </div>
                 <div className="mt-2">
-                  <div className="text-2xl md:text-3xl font-black text-amber-200">
-                    {metricas.porcentajeMeta}%
+                  <div className="text-2xl md:text-3xl font-black text-blue-300">
+                    {metricas.totalPersonasIngresadas}
                   </div>
-                  <div className="w-full bg-slate-950 h-2 rounded-full mt-2 overflow-hidden border border-slate-800">
-                    <div
-                      className="bg-gradient-to-r from-amber-500 to-yellow-300 h-full rounded-full transition-all duration-500"
-                      style={{ width: `${metricas.porcentajeMeta}%` }}
-                    ></div>
-                  </div>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    de {metricas.totalEntradasVendidas} entradas vendidas
+                  </p>
                 </div>
               </div>
 
@@ -1154,6 +1211,174 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================== */}
+        {/* VISTA 3: CONTROL DE ACCESO / PUERTA */}
+        {/* ========================================== */}
+        {activeTab === 'puerta' && (
+          <div className="space-y-4">
+            
+            {/* BUSCADOR DE PUERTA */}
+            <div className="relative">
+              <Search className="w-5 h-5 text-amber-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar comprador en la puerta (ej. Juan Pérez)..."
+                value={puertaSearchQuery}
+                onChange={(e) => setPuertaSearchQuery(e.target.value)}
+                className="w-full bg-slate-900 border-2 border-amber-500/30 focus:border-amber-400 rounded-2xl pl-12 pr-4 py-3 text-sm md:text-base text-slate-100 placeholder-slate-500 focus:outline-none shadow-lg"
+              />
+              {puertaSearchQuery && (
+                <button
+                  onClick={() => setPuertaSearchQuery('')}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* RESUMEN EN PUERTA */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-slate-400 block">Total en Lista:</span>
+                <span className="font-extrabold text-amber-300 text-sm">
+                  {ventasPuertaFiltradas.length} Compradores
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-slate-400 block">Personas Ingresadas:</span>
+                <span className="font-extrabold text-blue-400 text-sm">
+                  {metricas.totalPersonasIngresadas} / {metricas.totalEntradasVendidas}
+                </span>
+              </div>
+            </div>
+
+            {/* LISTA PARA CONTROL EN PUERTA */}
+            {loading ? (
+              <div className="text-center py-16 text-amber-400/70 flex flex-col items-center gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
+                <span className="text-xs font-semibold">Cargando lista de puerta...</span>
+              </div>
+            ) : ventasPuertaFiltradas.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-center text-slate-500 space-y-2">
+                <DoorOpen className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-sm font-bold text-slate-400">No se encontraron compradores</p>
+                <p className="text-xs text-slate-600">Verifica que el nombre esté bien escrito.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {ventasPuertaFiltradas.map((item) => {
+                  const adquiridas = Number(item.cantidad) || 0;
+                  const ingresadas = Number(item.ingresadas) || 0;
+                  const pendientesAcceso = Math.max(0, adquiridas - ingresadas);
+                  const estaCompleto = ingresadas >= adquiridas;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`bg-slate-900 border rounded-2xl p-4 flex flex-col justify-between gap-4 shadow-xl transition-all ${
+                        estaCompleto 
+                          ? 'border-emerald-500/30 bg-emerald-950/10' 
+                          : 'border-amber-500/30'
+                      }`}
+                    >
+                      {/* Cabecera Tarjeta Puerta */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="font-black text-slate-100 text-base md:text-lg flex items-center gap-2">
+                            {item.comprador}
+                            {estaCompleto && (
+                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-black rounded-lg border border-emerald-500/30">
+                                COMPLETO
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Vendido por: <b className="text-amber-300/90">{item.vendedora || 'Comité'}</b>
+                          </p>
+                        </div>
+
+                        {/* Indicador de Pago */}
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            item.estadoPago === 'PAGADO'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}
+                        >
+                          {item.estadoPago}
+                        </span>
+                      </div>
+
+                      {/* CONTADOR ENTRADAS Y BOTONES + / - */}
+                      <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <span className="text-slate-500 text-[10px] block uppercase font-bold">Compradas</span>
+                            <span className="font-extrabold text-slate-200 text-sm">{adquiridas}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 text-[10px] block uppercase font-bold text-center">Ingresadas</span>
+                            <span className="font-extrabold text-blue-400 text-sm block text-center">{ingresadas}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-slate-500 text-[10px] block uppercase font-bold">Pendientes</span>
+                            <span className={`font-extrabold text-sm ${pendientesAcceso > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-600'}`}>
+                              {pendientesAcceso}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* BARRA Y CONTROLES + / - */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={ingresadas <= 0}
+                            onClick={() => updateIngresadas(item.id, -1, adquiridas)}
+                            className="w-10 h-10 bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 rounded-xl flex items-center justify-center text-slate-200 font-bold active:scale-95 transition-all"
+                            title="Restar 1 ingresada"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+
+                          <div className="flex-1 bg-slate-900 border border-slate-800 py-2 rounded-xl text-center">
+                            <span className="text-xs font-black text-slate-200">
+                              {ingresadas} de {adquiridas}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={ingresadas >= adquiridas}
+                            onClick={() => updateIngresadas(item.id, 1, adquiridas)}
+                            className="w-10 h-10 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-30 text-slate-950 rounded-xl flex items-center justify-center font-black shadow-md active:scale-95 transition-all"
+                            title="Sumar 1 ingresada"
+                          >
+                            <Plus className="w-4 h-4 stroke-[3]" />
+                          </button>
+                        </div>
+
+                        {/* BOTÓN RÁPIDO INGRESAR TODAS */}
+                        {pendientesAcceso > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setIngresadasTodas(item.id, adquiridas)}
+                            className="w-full py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-extrabold rounded-xl transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <UserCheck className="w-4 h-4" />
+                            <span>Ingresar Todas ({pendientesAcceso} restantes)</span>
+                          </button>
+                        )}
+                      </div>
+
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
